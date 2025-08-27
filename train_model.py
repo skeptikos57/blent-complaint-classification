@@ -271,23 +271,85 @@ def main():
     print(f"Données chargées: {len(data)} plaintes")
     
     # ÉTAPE 2 : Préparation du texte
-    # Transforme les textes de plaintes en listes de mots
-    print("\n🔤 Tokenisation des textes...")
-    tokens = tokenize_corpus(data["complaint_text"])
+    # Vérifier si on doit utiliser le cache ou regénérer
+    import pickle
+    import sys
     
-    # ÉTAPE 3 : Création des embeddings Word2Vec
-    # Apprend à représenter chaque mot comme un vecteur
-    w2v = fit_word2vec(tokens)
+    use_cache = True
+    if len(sys.argv) > 1 and sys.argv[1] == '--regenerate':
+        use_cache = False
+        print("🔄 Mode regénération : création de nouveaux tokens et Word2Vec")
     
-    # ÉTAPE 4 : Vectorisation des textes
-    # Transforme chaque texte en matrice de vecteurs
-    print("\n🎯 Vectorisation des textes...")
-    X = text2vec(tokens, w2v)
+    tokens_cache_path = 'models/tokens_cache.pkl'
     
-    # ÉTAPE 5 : Préparation des labels
-    # Transforme les catégories en format one-hot
-    print("\n🏷️ Préparation des labels...")
-    y = prepare_labels(data, class_mapping)
+    if use_cache and os.path.exists(tokens_cache_path) and os.path.exists('models/w2v.wv'):
+        # Charger depuis le cache
+        print("\n📦 Chargement des tokens depuis le cache...")
+        with open(tokens_cache_path, 'rb') as f:
+            tokens_data = pickle.load(f)
+        tokens = tokens_data['tokens']
+        print(f"✅ {len(tokens)} tokens chargés depuis le cache")
+        
+        print("\n📦 Chargement du modèle Word2Vec depuis le cache...")
+        from gensim.models import KeyedVectors
+        w2v_vectors = KeyedVectors.load("models/w2v.wv")
+        # Créer un objet Word2Vec factice pour la compatibilité
+        w2v = type('obj', (object,), {'wv': w2v_vectors})()
+        print(f"✅ Word2Vec chargé avec {len(w2v.wv)} mots")
+    else:
+        # Générer et sauvegarder
+        print("\n🔤 Tokenisation des textes...")
+        tokens = tokenize_corpus(data["complaint_text"])
+        
+        # Sauvegarder les tokens
+        tokens_data = {
+            'tokens': tokens,
+            'max_length': MAX_LENGTH,
+            'w2v_size': W2V_SIZE,
+            'timestamp': pd.Timestamp.now().isoformat()
+        }
+        with open(tokens_cache_path, 'wb') as f:
+            pickle.dump(tokens_data, f)
+        print(f"💾 Tokens sauvegardés dans {tokens_cache_path}")
+        
+        # ÉTAPE 3 : Création des embeddings Word2Vec
+        # Apprend à représenter chaque mot comme un vecteur
+        w2v = fit_word2vec(tokens)
+    
+    # ÉTAPE 4 & 5 : Vectorisation et labels (avec cache)
+    vectors_cache_path = 'models/vectors_cache.pkl'
+    labels_cache_path = 'models/labels_cache.pkl'
+    
+    if use_cache and os.path.exists(vectors_cache_path) and os.path.exists(labels_cache_path):
+        # Charger les vecteurs et labels depuis le cache
+        print("\n📦 Chargement des vecteurs et labels depuis le cache...")
+        
+        with open(vectors_cache_path, 'rb') as f:
+            X = pickle.load(f)
+        print(f"✅ Vecteurs chargés : shape {X.shape}")
+        
+        with open(labels_cache_path, 'rb') as f:
+            y = pickle.load(f)
+        print(f"✅ Labels chargés : shape {y.shape}")
+    else:
+        # Générer et sauvegarder
+        # ÉTAPE 4 : Vectorisation des textes
+        print("\n🎯 Vectorisation des textes...")
+        X = text2vec(tokens, w2v)
+        
+        # Sauvegarder les vecteurs
+        with open(vectors_cache_path, 'wb') as f:
+            pickle.dump(X, f)
+        print(f"💾 Vecteurs sauvegardés dans {vectors_cache_path}")
+        
+        # ÉTAPE 5 : Préparation des labels
+        print("\n🏷️ Préparation des labels...")
+        y = prepare_labels(data, class_mapping)
+        
+        # Sauvegarder les labels
+        with open(labels_cache_path, 'wb') as f:
+            pickle.dump(y, f)
+        print(f"💾 Labels sauvegardés dans {labels_cache_path}")
     
     # ÉTAPE 6 : Division train/test
     # 75% pour l'entraînement, 25% pour le test
@@ -342,7 +404,7 @@ def main():
     class_weight_dict = {i: weight for i, weight in enumerate(class_weight_array)}
     
     # Entraînement du modèle
-    history = rnn.fit(
+    _ = rnn.fit(  # history peut être utilisé pour analyser l'entraînement
         x=X_train, y=y_train,  # Données d'entraînement
         validation_data=(X_test, y_test),  # Données de validation
         epochs=20,  # Nombre de passes sur les données (augmenté pour plus de classes)

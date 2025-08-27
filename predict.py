@@ -36,9 +36,10 @@ def load_models():
     - Le modèle RNN : le réseau de neurones qui fait la prédiction
     - Le modèle Word2Vec : pour convertir les mots en vecteurs numériques
     - Le tokenizer Spacy : pour découper le texte en mots
+    - Les informations de tokenisation (optionnel)
     
     Returns:
-        Tuple contenant (modèle_rnn, modèle_word2vec, tokenizer_spacy)
+        Tuple contenant (modèle_rnn, modèle_word2vec, tokenizer_spacy, class_data, tokens_info)
     """
     # Charge le modèle de deep learning sauvegardé après l'entraînement
     # Utiliser la variable d'environnement pour le nom du fichier
@@ -56,11 +57,20 @@ def load_models():
         class_data = json.load(f)
     print("✅ Mapping des classes chargé depuis models/class_mapping.json")
     
+    # Essayer de charger les informations de tokenisation (optionnel)
+    tokens_info = None
+    tokens_cache_path = 'models/tokens_cache.pkl'
+    if os.path.exists(tokens_cache_path):
+        import pickle
+        with open(tokens_cache_path, 'rb') as f:
+            tokens_info = pickle.load(f)
+        print(f"✅ Informations de tokenisation chargées (créées le {tokens_info.get('timestamp', 'N/A')})")
+    
     # Initialise l'analyseur de texte anglais (les plaintes sont en anglais)
     from spacy.lang.en import English
     nlp = English()
     
-    return rnn, w2v, nlp, class_data
+    return rnn, w2v, nlp, class_data, tokens_info
 
 def process_comment(comment, w2v, nlp, W2V_SIZE, MAX_LENGTH):
     """Transforme un commentaire texte en matrice de vecteurs Word2Vec.
@@ -156,7 +166,11 @@ def main():
     """
     # ÉTAPE 1 : Chargement des modèles
     # Charge le RNN, Word2Vec, le tokenizer et le mapping des classes
-    rnn, w2v, nlp, class_data = load_models()
+    rnn, w2v, nlp, class_data, tokens_info = load_models()
+    
+    # Afficher des informations sur la tokenisation si disponible
+    if tokens_info:
+        print(f"ℹ️  Utilisation des paramètres de tokenisation : MAX_LENGTH={tokens_info.get('max_length')}, W2V_SIZE={tokens_info.get('w2v_size')}")
     
     # ÉTAPE 2 : Récupération du commentaire
     # Vérifie qu'un commentaire a été fourni en argument
