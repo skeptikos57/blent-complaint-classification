@@ -1,0 +1,42 @@
+# Environnement virtuel Python
+venv/
+env/
+ENV/
+.venv/
+
+# Fichiers temporaires Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Fichiers de cache
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs TensorBoard
+logs/*
+
+# Fichiers système
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Variables d'environnement (contient des secrets)
+.env.local
+.env.*.local
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb
+
+# Données
+data/raw/*
+data/prepared/*
+
+# Models
+models/*

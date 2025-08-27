@@ -1,0 +1,8 @@
+numpy
+pandas
+matplotlib
+tensorflow[and-cuda]
+gensim
+spacy
+scikit-learn
+dotenv
