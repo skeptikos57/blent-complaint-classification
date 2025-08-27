@@ -73,6 +73,7 @@ def fit_word2vec(tokens):
     
     Word2Vec apprend à représenter chaque mot comme un vecteur de nombres.
     Les mots similaires auront des vecteurs proches (ex: "excellent" et "super").
+    Version optimisée pour les plaintes financières (vocabulaire technique).
     
     Args:
         tokens: Liste de listes de mots provenant de tokenize_corpus
@@ -80,13 +81,22 @@ def fit_word2vec(tokens):
     Returns:
         Modèle Word2Vec entraîné
     """
-    # Création et entraînement du modèle Word2Vec
+    import multiprocessing
+    
+    # Création et entraînement du modèle Word2Vec avec paramètres optimisés
     w2v = Word2Vec(
-        sentences=tokens,  # Les commentaires tokenisés
-        vector_size=W2V_SIZE,  # Taille des vecteurs (100 dimensions par défaut)
-        min_count=W2V_MIN_COUNT,  # Ignore les mots qui apparaissent moins de 3 fois
-        window=5,  # Contexte : regarde 5 mots avant et après pour apprendre
-        workers=2  # Utilise 2 threads pour accélérer l'entraînement
+        sentences=tokens,           # Les commentaires tokenisés
+        vector_size=W2V_SIZE,        # Taille des vecteurs (200 recommandé)
+        min_count=W2V_MIN_COUNT,     # Ignore les mots rares (3 est bon)
+        window=7,                    # Augmenté de 5 à 7 pour mieux capturer le contexte financier
+        sg=1,                        # Skip-gram (1) au lieu de CBOW (0) - meilleur pour vocabulaire technique
+        hs=0,                        # Hierarchical softmax désactivé
+        negative=10,                 # Negative sampling augmenté de 5 à 10 pour meilleure précision
+        alpha=0.025,                 # Taux d'apprentissage initial
+        min_alpha=0.0001,           # Taux d'apprentissage minimal
+        epochs=15,                   # Augmenté de 5 à 15 pour meilleur apprentissage (était implicite)
+        workers=multiprocessing.cpu_count() - 1,  # Utilise tous les CPU disponibles - 1
+        seed=42                      # Pour la reproductibilité
     )
     
     # Sauvegarder le modèle pour pouvoir le réutiliser plus tard
@@ -94,7 +104,22 @@ def fit_word2vec(tokens):
     
     # Afficher des statistiques sur le vocabulaire appris
     print(f"\n📊 Informations sur le modèle Word2Vec:")
-    print(f"- Taille du vocabulaire: {len(w2v.wv)} mots uniques")
+    print(f"  • Taille du vocabulaire: {len(w2v.wv)} mots uniques")
+    print(f"  • Dimensions des vecteurs: {W2V_SIZE}")
+    print(f"  • Fenêtre de contexte: 7 mots")
+    print(f"  • Algorithme: Skip-gram avec negative sampling")
+    print(f"  • Epochs d'entraînement: 15")
+    
+    # Exemples de similarités pour vérifier la qualité
+    try:
+        test_words = ['credit', 'payment', 'account', 'debt', 'loan']
+        print("\n🔍 Test de similarité (qualité des embeddings):")
+        for word in test_words:
+            if word in w2v.wv:
+                similar = w2v.wv.most_similar(word, topn=3)
+                print(f"  • '{word}' → {[w for w, _ in similar]}")
+    except:
+        pass
     
     return w2v
 
@@ -384,19 +409,41 @@ def main():
             pickle.dump(y, f)
         print(f"💾 Labels sauvegardés dans {labels_cache_path}")
     
-    # ÉTAPE 6 : Division train/test
+    # ÉTAPE 6 : Division train/test avec stratification
     # 75% pour l'entraînement, 25% pour le test
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.25, random_state=42
-    )
+    # Stratification pour garder les proportions de classes
+    from sklearn.model_selection import train_test_split
+    
+    # Convertir y en indices pour stratification
+    y_indices = np.argmax(y, axis=1)
+    
+    # Vérifier si stratification possible
+    from collections import Counter
+    class_counts = Counter(y_indices)
+    min_class_count = min(class_counts.values())
+    
+    if min_class_count >= 2:
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.25, random_state=42, stratify=y_indices
+        )
+        print("✅ Stratification appliquée pour maintenir les proportions")
+    else:
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.25, random_state=42
+        )
+        print("⚠️ Stratification impossible (classes trop rares)")
     
     # ÉTAPE 7 : Création et configuration du modèle
     print(f"\n🤖 Création du modèle pour {num_classes} classes...")
     rnn = create_rnn(num_classes)
     
     # Compilation : définit comment le modèle va apprendre
+    # Optimiseur avec taux d'apprentissage ajusté pour 21 classes
+    from tensorflow.keras.optimizers import Adam
+    optimizer = Adam(learning_rate=0.0005)  # Réduit de 0.001 pour apprentissage plus stable
+    
     rnn.compile(
-        optimizer='adam',  # Algorithme d'optimisation (ajuste les poids)
+        optimizer=optimizer,  # Algorithme d'optimisation avec taux ajusté
         loss="categorical_crossentropy",  # Fonction de perte pour classification multi-classes
         metrics=['categorical_accuracy']  # Métrique à surveiller (% de bonnes prédictions)
     )
@@ -413,8 +460,9 @@ def main():
     # Early stopping pour éviter le surapprentissage
     early_stopping = EarlyStopping(
         monitor='val_loss',
-        patience=3,
-        restore_best_weights=True
+        patience=10,  # Augmenté de 3 à 10 pour laisser plus de temps
+        restore_best_weights=True,
+        verbose=1  # Affiche quand il s'active
     )
     
     # Checkpoint pour sauvegarder le meilleur modèle
@@ -422,28 +470,65 @@ def main():
         'models/best_model.keras',
         monitor='val_categorical_accuracy',
         save_best_only=True,
-        mode='max'
+        mode='max',
+        verbose=1
     )
     
-    # Calculer les poids de classes pour gérer le déséquilibre
+    # Réduction du taux d'apprentissage si plateau
+    from tensorflow.keras.callbacks import ReduceLROnPlateau
+    reduce_lr = ReduceLROnPlateau(
+        monitor='val_loss',
+        factor=0.5,  # Divise le LR par 2
+        patience=5,   # Après 5 epochs sans amélioration
+        min_lr=0.00001,
+        verbose=1
+    )
+    
+    # Calculer les poids de classes pour gérer le déséquilibre EXTRÊME
     # Convertir y_train en indices pour compute_class_weight
     y_train_indices = np.argmax(y_train, axis=1)
     unique_classes = np.unique(y_train_indices)
-    class_weight_array = compute_class_weight(
-        'balanced',
-        classes=unique_classes,
-        y=y_train_indices
-    )
-    class_weight_dict = {i: weight for i, weight in enumerate(class_weight_array)}
+    
+    # Compter les échantillons par classe
+    from collections import Counter
+    class_counts = Counter(y_train_indices)
+    total_samples = len(y_train_indices)
+    n_classes_present = len(unique_classes)
+    
+    # Calculer les poids avec stratégie agressive pour déséquilibre extrême
+    class_weight_dict = {}
+    max_count = max(class_counts.values())
+    
+    print("\n⚖️ Poids des classes (compensation du déséquilibre):")
+    for class_id in range(num_classes):
+        if class_id in class_counts:
+            count = class_counts[class_id]
+            # Stratégie sqrt pour éviter des poids trop extrêmes
+            # mais toujours favoriser les minorités
+            weight = np.sqrt(max_count / count)
+            # Limiter les poids pour éviter l'instabilité
+            weight = min(weight, 50.0)  # Cap à 50x
+            class_weight_dict[class_id] = weight
+            
+            if count < 100:  # Classes très minoritaires
+                print(f"  ⚠️ Classe {class_id}: {count} exemples → poids {weight:.2f}x")
+        else:
+            # Classe absente dans train
+            class_weight_dict[class_id] = 0.0
+            print(f"  ❌ Classe {class_id}: ABSENTE dans l'entraînement!")
+    
+    print(f"\n📊 Classes présentes: {n_classes_present}/{num_classes}")
+    print(f"📊 Poids moyen appliqué: {np.mean(list(class_weight_dict.values())):.2f}x")
     
     # Entraînement du modèle
     _ = rnn.fit(  # history peut être utilisé pour analyser l'entraînement
         x=X_train, y=y_train,  # Données d'entraînement
         validation_data=(X_test, y_test),  # Données de validation
-        epochs=20,  # Nombre de passes sur les données (augmenté pour plus de classes)
-        batch_size=32,  # Traite 32 textes à la fois
+        epochs=30,  # Augmenté à 30 pour permettre plus d'apprentissage (21 classes)
+        batch_size=64,  # Augmenté à 64 pour stabiliser l'apprentissage
         class_weight=class_weight_dict,  # Poids pour gérer le déséquilibre
-        callbacks=[tensorboard_callback, early_stopping, checkpoint]  # Pour le monitoring
+        callbacks=[tensorboard_callback, early_stopping, checkpoint, reduce_lr],  # Pour le monitoring
+        verbose=1  # Affiche la progression détaillée
     )
     
     # ÉTAPE 9 : Sauvegarde
