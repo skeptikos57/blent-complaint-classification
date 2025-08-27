@@ -178,6 +178,7 @@ support-classification/
 ├── analyze_classes.py              # Analyse de la distribution des classes
 ├── train_model.py                  # Entraînement du modèle
 ├── predict.py                      # Prédictions sur nouveaux textes
+├── confusion_matrix.py             # Génération de la matrice de confusion
 │
 ├── .env                            # Variables d'environnement
 ├── requirements.txt                # Dépendances Python
@@ -301,6 +302,54 @@ Le modèle génère automatiquement :
 - Précision par classe
 - F1-score pondéré
 - Rapport de classification détaillé
+
+## 📊 Matrice de Confusion
+
+### Qu'est-ce qu'une matrice de confusion ?
+
+Une **matrice de confusion** est un outil essentiel pour évaluer les performances d'un modèle de classification. Elle présente sous forme de tableau le nombre de prédictions correctes et incorrectes pour chaque catégorie.
+
+### Génération de la matrice
+
+```bash
+# Générer la matrice avec toutes les données de test
+python confusion_matrix.py
+
+# Ou limiter le nombre d'échantillons pour des tests rapides
+python confusion_matrix.py --samples 5000
+```
+
+### Visualisations générées
+
+Le script `confusion_matrix.py` génère plusieurs analyses :
+
+1. **Matrice de confusion standard** : Affiche le nombre absolu de prédictions pour chaque combinaison classe réelle/classe prédite
+2. **Matrice de confusion normalisée** : Affiche les pourcentages pour mieux comprendre les taux d'erreur
+3. **Métriques de performance** :
+   - Accuracy globale du modèle
+   - Précision, rappel et F1-score par catégorie
+   - Top 5 des meilleures et pires classes
+4. **Analyse des confusions** : Identifie les erreurs de classification les plus fréquentes
+
+### Interprétation des résultats
+
+- **Diagonale principale** : Prédictions correctes (plus les valeurs sont élevées, mieux c'est)
+- **Hors diagonale** : Erreurs de classification (indiquent quelles catégories sont confondues)
+- **Classes problématiques** : Les catégories avec beaucoup de confusions suggèrent des similarités dans le langage utilisé
+
+### Exemple de résultats typiques
+
+Avec 10k échantillons d'entraînement :
+- **Accuracy globale** : 25-40% sur 21 classes
+- **Meilleures classes** : "Credit reporting" (50%+ F1-score)
+- **Confusions fréquentes** : Les produits de crédit similaires (cartes, prêts) sont souvent confondus
+
+### Fichiers générés
+
+Les résultats sont sauvegardés dans le dossier `models/` :
+- `confusion_matrix_[timestamp].png` : Matrice visuelle avec nombres absolus
+- `confusion_matrix_normalized_[timestamp].png` : Matrice en pourcentages
+- `classification_report_[timestamp].json` : Métriques détaillées en JSON
 
 ## 📚 Objectifs Pédagogiques
 

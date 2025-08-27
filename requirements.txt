@@ -1,8 +1,9 @@
 numpy
 pandas
 matplotlib
+seaborn
 tensorflow[and-cuda]
 gensim
 spacy
 scikit-learn
-dotenv
+python-dotenv
