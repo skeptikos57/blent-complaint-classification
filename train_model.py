@@ -100,38 +100,58 @@ def fit_word2vec(tokens):
 
 def text2vec(tokens, w2v):
     """Convertit chaque texte de plainte en une matrice de vecteurs Word2Vec.
+    Version optimisée pour grandes quantités de données.
     
     Transforme les mots en nombres pour que le réseau de neurones puisse les comprendre.
-    Chaque commentaire devient une matrice de taille fixe (100 x 64).
+    Chaque commentaire devient une matrice de taille fixe (W2V_SIZE x MAX_LENGTH).
     
     Args:
         tokens: Liste de listes de mots
         w2v: Modèle Word2Vec entraîné
     
     Returns:
-        Array numpy 3D de forme (nb_commentaires, 100, 64)
-        - Dimension 1: Chaque commentaire
-        - Dimension 2: Les 100 dimensions du vecteur Word2Vec
-        - Dimension 3: Les 64 mots maximum par commentaire
+        Array numpy 3D de forme (nb_commentaires, W2V_SIZE, MAX_LENGTH)
     """
+    n_samples = len(tokens)
+    
+    # Estimation de la mémoire nécessaire
+    memory_gb = (n_samples * W2V_SIZE * MAX_LENGTH * 4) / (1024**3)
+    print(f"  Vectorisation de {n_samples} textes...")
+    print(f"  Dimensions: {W2V_SIZE} x {MAX_LENGTH}")
+    print(f"  Mémoire estimée: {memory_gb:.2f} GB")
+    
+    if memory_gb > 16:
+        print(f"  ⚠️  ATTENTION: Utilisation mémoire très élevée!")
+        print(f"  Suggestions:")
+        print(f"    - Réduire NB_COMMENT (actuellement {n_samples})")
+        print(f"    - Réduire W2V_SIZE (actuellement {W2V_SIZE})")
+        print(f"    - Réduire MAX_LENGTH (actuellement {MAX_LENGTH})")
+    
     # Pré-allouer le tableau numpy pour économiser la mémoire
     # Utilisation de float32 au lieu de float64 pour diviser la mémoire par 2
-    n_samples = len(tokens)
     X = np.zeros((n_samples, W2V_SIZE, MAX_LENGTH), dtype=np.float32)
     
-    # Pour chaque commentaire tokenisé
-    for i, row_tokens in enumerate(tokens):
-        # Remplir la matrice avec les vecteurs des mots (max 64 mots)
-        for j in range(min(MAX_LENGTH, len(row_tokens))):
-            # Vérifier si le mot existe dans le vocabulaire
-            if row_tokens[j] in w2v.wv:
-                # Mettre le vecteur du mot j dans la colonne j
-                X[i, :, j] = w2v.wv[row_tokens[j]]
-            # Si le mot n'est pas dans le vocabulaire, on laisse des zéros
+    # Traitement par batch pour meilleure gestion mémoire
+    batch_size = 5000
+    for batch_start in range(0, n_samples, batch_size):
+        batch_end = min(batch_start + batch_size, n_samples)
         
-        # Afficher la progression tous les 1000 textes
-        if i % 1000 == 0:
-            print(f"{(i * 100) / len(tokens):.1f}% effectué.")
+        # Pour chaque commentaire dans le batch
+        for i in range(batch_start, batch_end):
+            row_tokens = tokens[i]
+            # Remplir la matrice avec les vecteurs des mots (limité à MAX_LENGTH)
+            for j in range(min(MAX_LENGTH, len(row_tokens))):
+                # Vérifier si le mot existe dans le vocabulaire
+                if row_tokens[j] in w2v.wv:
+                    # Mettre le vecteur du mot j dans la colonne j
+                    X[i, :, j] = w2v.wv[row_tokens[j]]
+                # Si le mot n'est pas dans le vocabulaire, on laisse des zéros
+        
+        # Afficher la progression par batch
+        progress = (batch_end * 100) / n_samples
+        print(f"  {progress:.1f}% effectué ({batch_end}/{n_samples} textes)")
+    
+    print(f"  ✓ Vectorisation terminée : {X.nbytes / 1024**3:.2f} GB utilisés")
     
     return X
 
@@ -139,6 +159,7 @@ def prepare_labels(data, class_mapping):
     """Prépare les étiquettes (labels) pour l'entraînement.
     
     Transforme les catégories de produits en indices numériques puis en one-hot encoding.
+    Version optimisée pour grandes quantités de données.
     
     Args:
         data: DataFrame avec colonne 'product'
@@ -147,15 +168,27 @@ def prepare_labels(data, class_mapping):
     Returns:
         Array one-hot encoded (nb_classes colonnes : une seule vaut 1, les autres 0)
     """
+    print(f"  Préparation de {len(data)} labels...")
+    
     # Mapper les catégories de produits aux indices numériques
     y_indices = data['product'].map(class_mapping)
     
-    # Transformer en one-hot encoding
+    # Version vectorisée plus rapide (sans boucle Python)
     num_classes = len(class_mapping)
-    y = np.zeros((len(y_indices), num_classes))
-    for i, idx in enumerate(y_indices):
-        if not pd.isna(idx):
-            y[i, int(idx)] = 1
+    n_samples = len(y_indices)
+    
+    # Utiliser float32 au lieu de float64 pour économiser la mémoire
+    y = np.zeros((n_samples, num_classes), dtype=np.float32)
+    
+    # Remplir uniquement les indices valides (vectorisé)
+    valid_mask = ~y_indices.isna()
+    valid_indices = y_indices[valid_mask].astype(int).values
+    valid_positions = np.where(valid_mask)[0]
+    
+    # Remplissage vectorisé (beaucoup plus rapide que la boucle)
+    y[valid_positions, valid_indices] = 1
+    
+    print(f"  ✓ Labels préparés : shape {y.shape}, mémoire : {y.nbytes / 1024**2:.1f} MB")
     
     return y
 
